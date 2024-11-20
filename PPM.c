@@ -4,6 +4,7 @@
 #include <string.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 #include <unistd.h>
 #include <errno.h>
 
@@ -53,7 +54,18 @@ void free_context(Context *ctx) {
     ctx->root = NULL;
 }
 
-void compress_ppm(const char *input_file, const char *compressed_file) {
+// Функция для создания директории (если не существует)
+void create_directory_if_needed(const char *dir_path) {
+    struct stat st = {0};
+    if (stat(dir_path, &st) == -1) {
+        if (mkdir(dir_path, 0700) == -1) {
+            perror("Ошибка создания директории");
+            exit(EXIT_FAILURE);
+        }
+    }
+}
+
+void compress_ppm(const char *input_file, const char *compressed_file, mode_t mode, uid_t uid, gid_t gid) {
     printf("Открытие файла: %s для чтения\n", input_file);
     printf("Создание файла: %s для записи\n", compressed_file);
 
@@ -77,6 +89,10 @@ void compress_ppm(const char *input_file, const char *compressed_file) {
 
     unsigned char context[MAX_CONTEXT] = {0};
     int context_len = 0;
+
+    fwrite(&mode, sizeof(mode), 1, out);
+    fwrite(&uid, sizeof(uid), 1, out);
+    fwrite(&gid, sizeof(gid), 1, out);
 
     unsigned char buffer;
     while (fread(&buffer, 1, 1, in) == 1) {
@@ -114,21 +130,6 @@ void compress_ppm(const char *input_file, const char *compressed_file) {
 
 // Функция для обработки всех файлов в директории
 void compress_directory(const char *input_dir_name, const char *output_dir_name) {
-    struct stat statbuf;
-
-    // Проверяем существование входной директории
-    if (stat(input_dir_name, &statbuf) != 0) {
-        perror("Ошибка получения информации о файле/директории");
-        return;
-    }
-
-    // Создаем выходную директорию, если её нет
-    if (mkdir(output_dir_name, 0755) != 0 && errno != EEXIST) {
-        perror("Ошибка создания выходной директории");
-        return;
-    }
-
-    // Открываем входную директорию
     DIR *dir = opendir(input_dir_name);
     if (!dir) {
         perror("Ошибка открытия директории");
@@ -137,37 +138,38 @@ void compress_directory(const char *input_dir_name, const char *output_dir_name)
 
     struct dirent *entry;
     while ((entry = readdir(dir)) != NULL) {
-        // Пропускаем текущую и родительскую директории
+        // Пропускаем текущую и родительскую директорию
         if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
             continue;
         }
 
-        // Формируем пути для входного и выходного объекта
         char input_path[1024];
-        char output_path[1024];
         snprintf(input_path, sizeof(input_path), "%s/%s", input_dir_name, entry->d_name);
-        snprintf(output_path, sizeof(output_path), "%s/%s", output_dir_name, entry->d_name);
 
-        // Получаем информацию о текущем объекте
+        char output_path[1024];
+        snprintf(output_path, sizeof(output_path), "%s/%s.compressed", output_dir_name, entry->d_name);
+
+        struct stat statbuf;
         if (stat(input_path, &statbuf) == 0) {
             if (S_ISDIR(statbuf.st_mode)) {
-                // Если это директория, рекурсивно обрабатываем её
-                compress_directory(input_path, output_path);
+                // Если это директория, создаем выходную директорию для вложенной папки
+                char nested_output_dir[1024];
+                snprintf(nested_output_dir, sizeof(nested_output_dir), "%s/%s.compressed", output_dir_name, entry->d_name);
+                create_directory_if_needed(nested_output_dir);  // Создаем директорию, если ее нет
+
+                // Рекурсивно обрабатываем директорию
+                compress_directory(input_path, nested_output_dir);
             } else if (S_ISREG(statbuf.st_mode)) {
-                // Если это файл, обрабатываем его
-                char compressed_file[1024];
-                snprintf(compressed_file, sizeof(compressed_file), "%s.compressed", output_path);
-                compress_ppm(input_path, compressed_file);
+                // Если это обычный файл, сжимаем его
+                compress_ppm(input_path, output_path, statbuf.st_mode, statbuf.st_uid, statbuf.st_gid);
+                printf("Сжат: %s -> %s\n", input_path, output_path);
             }
-        } else {
-            perror("Ошибка получения информации о файле/директории");
         }
     }
 
     closedir(dir);
 }
 
-#include <sys/stat.h> // Для создания директорий (mkdir)
 
 // Функция декомпрессии одного файла
 void decompress_ppm(const char *compressed_file, const char *output_file) {
@@ -186,6 +188,13 @@ void decompress_ppm(const char *compressed_file, const char *output_file) {
 
     unsigned char context[MAX_CONTEXT] = {0};
     int context_len = 0;
+
+    mode_t mode;
+    uid_t uid;
+    gid_t gid;
+    fread(&mode, sizeof(mode), 1, in);
+    fread(&uid, sizeof(uid), 1, in);
+    fread(&gid, sizeof(gid), 1, in);
 
     double probability;
     while (fread(&probability, sizeof(probability), 1, in) == 1) {
@@ -221,6 +230,8 @@ void decompress_ppm(const char *compressed_file, const char *output_file) {
 
     fclose(in);
     fclose(out);
+    chmod(output_file, mode);
+    chown(output_file, uid, gid);
 }
 
 // Рекурсивная декомпрессия директории
@@ -248,10 +259,10 @@ void decompress_directory(const char *src_dir, const char *dest_dir) {
         struct stat statbuf;
         if (stat(input_path, &statbuf) == 0) {
             if (S_ISDIR(statbuf.st_mode)) {
-                // Если это директория, создаём соответствующую структуру и рекурсивно обрабатываем её
-                decompress_directory(input_path, output_path);
+                char nested_output_dir[1024];
+                snprintf(nested_output_dir, sizeof(nested_output_dir), "%s/%s", dest_dir, entry->d_name);
+                decompress_directory(input_path, nested_output_dir);
             } else if (S_ISREG(statbuf.st_mode)) {
-                // Если это обычный файл, разархивируем его в новую директорию
                 snprintf(output_path, sizeof(output_path), "%s/%s.decompressed", dest_dir, entry->d_name);
                 decompress_ppm(input_path, output_path);
                 printf("Разархивирован: %s -> %s\n", input_path, output_path);
