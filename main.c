@@ -1,67 +1,43 @@
+#include "PPM.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <dirent.h>
-#include <unistd.h>
-#include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <errno.h>
 
-void hello_user(char* inPath, char* outPath, size_t size)
-{
-    printf("Hello! I'm archiver that uses PPM algorithm\n");
-    printf("Input your directory:\n");
-    fgets(inPath, size, stdin);
-    inPath[strcspn(inPath, "\n")] = '\0';
+int main() {
+    int choose;
+    printf("Hello!\nInput 1 for compression\nInput 2 for decompression\n");
+    scanf("%d", &choose);  
 
-    printf("Input the final directory:\n");
-    fgets(outPath, size, stdin);
-    outPath[strcspn(outPath, "\n")] = '\0';
-}
+    if (choose == 1) {
+        char dir_name[1024];
+        char out_dir_name[1024];
+        printf("Enter the path to the directory for compression: ");
+        scanf("%s", dir_name);
+        printf("Enter the path to the directory result: ");
+        scanf("%s", out_dir_name);
+        
+        compress_directory(dir_name, out_dir_name);
+        printf("Compression completed!\n");
 
-void work_with_dir(char* inPath)
-{
-    DIR* dir;
-    struct dirent *entry;
+    } else if (choose == 2) {
+        char dir_name[1024];
+        char out_dir_name[1024];
+        printf("Enter the path to the directory for decompression: ");
+        scanf("%s", dir_name);
+        printf("Enter the path to the directory result: ");
+        scanf("%s", out_dir_name);
 
-    if (!(dir = opendir(inPath)))
-    {
-        printf("Error open!");
-        return;
+        decompress_directory(dir_name, out_dir_name); 
+        printf("Decompression completed!\n");
+
+    } else {
+        printf("Invalid option. Please enter 1 or 2.\n");
     }
 
-    while ((entry = readdir(dir)) != NULL)
-    {
-        char path[1024];
-        snprintf(path, sizeof(path), "%s/%s", inPath, entry->d_name);
-
-        struct stat info;
-        if (stat(path, &info) == 0)
-        {
-            if (S_ISDIR(info.st_mode))
-            {
-                if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") ==0)
-                    continue;
-                printf("Dirrectory: %s\n", path);
-                work_with_dir(path);
-            }
-            
-            if (S_ISREG(info.st_mode))
-            {
-                printf("File: %s\n", path);
-            }
-        }
-        else
-            printf("Error!");
-    }
-    closedir(dir);
-}
-
-int main()
-{
-    size_t buffer_size = 256;
-    char* inPath = (char*)malloc(buffer_size * sizeof(char));
-    char* outPath = (char*)malloc(buffer_size * sizeof(char));
-    hello_user(inPath, outPath, buffer_size);
-    work_with_dir(inPath);
     return 0;
 }
