@@ -54,7 +54,7 @@ void free_context(Context *ctx) {
     ctx->root = NULL;
 }
 
-// Функция для создания директории (если не существует)
+// Функция для создания директории
 void create_directory_if_needed(const char *dir_path) {
     struct stat st = {0};
     if (stat(dir_path, &st) == -1) {
@@ -135,6 +135,8 @@ void compress_directory(const char *input_dir_name, const char *output_dir_name)
         perror("Ошибка открытия директории");
         return;
     }
+
+    create_directory_if_needed(output_dir_name);
 
     struct dirent *entry;
     while ((entry = readdir(dir)) != NULL) {
